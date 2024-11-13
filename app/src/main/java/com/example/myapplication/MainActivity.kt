@@ -1,15 +1,14 @@
 package com.example.myapplication
 
-import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import android.os.Bundle
+import android.Manifest
+import android.hardware.SensorManager
+import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
@@ -23,66 +22,46 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import com.example.myapplication.ui.theme.MyApplicationTheme
-import java.util.concurrent.Executors
 
-class MainActivity : ComponentActivity(), SensorEventListener {
+class MainActivity : ComponentActivity() {
 
-    private lateinit var sensorManager: SensorManager
-    private var accelerometer: Sensor? = null
-    private var sensorData = mutableStateOf("Waiting for sensor data...")
+    private lateinit var sensorViewModel: SensorViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize the sensor manager and accelerometer
-        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-
-        // Register the sensor listener
-        accelerometer?.also { sensor ->
-            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        val sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        if (sensorManager != null) {
+            val factory = SensorViewModelFactory(sensorManager)
+            sensorViewModel = ViewModelProvider(this, factory).get(SensorViewModel::class.java)
+        } else {
+            Log.e("MainActivity", "SensorManager is not available.")
         }
+
 
         setContent {
             MyApplicationTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Column(modifier = Modifier.padding(innerPadding)) {
                         CameraPreview(modifier = Modifier.weight(1f)) // Camera Preview
-                        SensorDisplay(sensorData = sensorData.value) // Display sensor data
+                        val sensorData by sensorViewModel.sensorData.collectAsState()
+                        SensorDisplay(sensorData = sensorData) // Display sensor data
                     }
                 }
             }
         }
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
-        event?.let {
-            val x = it.values[0]
-            val y = it.values[1]
-            val z = it.values[2]
-            /*
-            As the accelerometer is "triggered" aka the Android Phone is moved,
-            update the screen with the current values
-            */
-            sensorData.value = "Accelerometer\nX: $x\nY: $y\nZ: $z"
-        }
-    }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // No action needed
-    }
-
     override fun onPause() {
         super.onPause()
-        sensorManager.unregisterListener(this)
+        sensorViewModel.stopSensorUpdates()
     }
 
     override fun onResume() {
         super.onResume()
-        accelerometer?.also { sensor ->
-            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-        }
+        sensorViewModel.startSensorUpdates()
     }
 }
 
@@ -97,7 +76,6 @@ fun CameraPreview(modifier: Modifier = Modifier) {
         )
     }
 
-    // Request camera permission if not already granted
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
