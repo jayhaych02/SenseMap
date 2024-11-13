@@ -40,14 +40,19 @@ class MainActivity : ComponentActivity() {
             Log.e("MainActivity", "SensorManager is not available.")
         }
 
-
         setContent {
             MyApplicationTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Column(modifier = Modifier.padding(innerPadding)) {
-                        CameraPreview(modifier = Modifier.weight(1f)) // Camera Preview
-                        val sensorData by sensorViewModel.sensorData.collectAsState()
-                        SensorDisplay(sensorData = sensorData) // Display sensor data
+                        CameraPreview(modifier = Modifier.weight(1f))
+
+                        val accelerometerData by sensorViewModel.accelerometerData.collectAsState()
+                        val gyroscopeData by sensorViewModel.gyroscopeData.collectAsState()
+                        val magnetometerData by sensorViewModel.magnetometerData.collectAsState()
+
+                        SensorDisplay("Accelerometer: $accelerometerData")
+                        SensorDisplay("Gyroscope: $gyroscopeData")
+                        SensorDisplay("Magnetometer: $magnetometerData")
                     }
                 }
             }
@@ -102,7 +107,7 @@ fun CameraPreview(modifier: Modifier = Modifier) {
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
-                cameraProvider.unbindAll() // Unbind any previous use cases
+                cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(context as ComponentActivity, cameraSelector, preview)
             } catch (e: Exception) {
                 e.printStackTrace()

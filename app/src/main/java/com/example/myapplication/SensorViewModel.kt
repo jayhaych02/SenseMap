@@ -14,31 +14,32 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class SensorViewModel(
-    private val sensorManager: SensorManager  // SensorManager is passed to the ViewModel
+    private val sensorManager: SensorManager
 ) : ViewModel(), SensorEventListener {
 
-    private val _sensorData = MutableStateFlow("Waiting for sensor data...")
-    val sensorData: StateFlow<String> = _sensorData
+    private val _accelerometerData = MutableStateFlow("Waiting for accelerometer data...")
+    val accelerometerData: StateFlow<String> = _accelerometerData
 
+    private val _gyroscopeData = MutableStateFlow("Waiting for gyroscope data...")
+    val gyroscopeData: StateFlow<String> = _gyroscopeData
 
+    private val _magnetometerData = MutableStateFlow("Waiting for magnetometer data...")
+    val magnetometerData: StateFlow<String> = _magnetometerData
 
     private var accelerometer: Sensor? = null
     private var gyroscope: Sensor? = null
     private var magnetometer: Sensor? = null
-    private var proximity: Sensor? = null
 
     init {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-        proximity = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
     }
 
     fun startSensorUpdates() {
         accelerometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         gyroscope?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         magnetometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
-        proximity?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
     }
 
     fun stopSensorUpdates() {
@@ -49,19 +50,29 @@ class SensorViewModel(
         event?.let {
             val sensorType = it.sensor.type
             val data = when (sensorType) {
-                Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_MAGNETIC_FIELD -> {
-                    if (it.values.size >= 3) "X=${it.values[0]}, Y=${it.values[1]}, Z=${it.values[2]}"
-                    else "Insufficient data"
+                Sensor.TYPE_ACCELEROMETER -> {
+                    "X=%.3f, Y=%.3f, Z=%.3f".format(it.values[0], it.values[1], it.values[2])
                 }
-                Sensor.TYPE_PROXIMITY -> "Proximity: ${it.values[0]}"
+                Sensor.TYPE_GYROSCOPE -> {
+                    "X=%.3f, Y=%.3f, Z=%.3f".format(it.values[0], it.values[1], it.values[2])
+                }
+                Sensor.TYPE_MAGNETIC_FIELD -> {
+                    "X=%.3f, Y=%.3f, Z=%.3f".format(it.values[0], it.values[1], it.values[2])
+                }
                 else -> "Unknown Sensor"
             }
 
             viewModelScope.launch(Dispatchers.Default) {
-                _sensorData.value = data
+                when (sensorType) {
+                    Sensor.TYPE_ACCELEROMETER -> _accelerometerData.value = data
+                    Sensor.TYPE_GYROSCOPE -> _gyroscopeData.value = data
+                    Sensor.TYPE_MAGNETIC_FIELD -> _magnetometerData.value = data
+                }
+                Log.d("Sensor Data:", data)
             }
         }
     }
+
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         val accuracyMessage = when (accuracy) {
