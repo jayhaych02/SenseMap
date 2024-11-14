@@ -1,10 +1,13 @@
 package com.example.myapplication
 
+import SensorViewModel
+import SensorViewModelFactory
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.Manifest
 import android.hardware.SensorManager
+import android.net.wifi.WifiManager
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,18 +29,19 @@ import androidx.lifecycle.ViewModelProvider
 import com.example.myapplication.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
-
     private lateinit var sensorViewModel: SensorViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Initialize SensorManager and WifiManager
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        if (sensorManager != null) {
-            val factory = SensorViewModelFactory(sensorManager)
+        val wifiManager = getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (sensorManager != null && wifiManager != null) {
+            val factory = SensorViewModelFactory(sensorManager, wifiManager, this)  // Pass `this` as context
             sensorViewModel = ViewModelProvider(this, factory).get(SensorViewModel::class.java)
         } else {
-            Log.e("MainActivity", "SensorManager is not available.")
+            Log.e("MainActivity", "SensorManager or WifiManager is not available.")
         }
 
         setContent {
@@ -49,13 +53,30 @@ class MainActivity : ComponentActivity() {
                         val accelerometerData by sensorViewModel.accelerometerData.collectAsState()
                         val gyroscopeData by sensorViewModel.gyroscopeData.collectAsState()
                         val magnetometerData by sensorViewModel.magnetometerData.collectAsState()
+                        val wifiData by sensorViewModel.wifiData.collectAsState()
 
                         SensorDisplay("Accelerometer: $accelerometerData")
                         SensorDisplay("Gyroscope: $gyroscopeData")
                         SensorDisplay("Magnetometer: $magnetometerData")
+                        SensorDisplay("Wi-Fi Data:\n$wifiData")
                     }
                 }
             }
+        }
+
+        // Request location permission if necessary for Wi-Fi scanning
+        requestLocationPermission()
+    }
+
+    private fun requestLocationPermission() {
+        val locationPermission = Manifest.permission.ACCESS_FINE_LOCATION
+        if (ContextCompat.checkSelfPermission(this, locationPermission) != PackageManager.PERMISSION_GRANTED) {
+            val launcher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                if (!granted) {
+                    Log.e("MainActivity", "Location permission denied, Wi-Fi scanning will not work.")
+                }
+            }
+            launcher.launch(locationPermission)
         }
     }
 
