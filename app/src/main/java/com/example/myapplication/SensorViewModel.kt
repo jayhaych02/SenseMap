@@ -1,3 +1,5 @@
+package com.example.myapplication
+
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -7,6 +9,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
@@ -42,7 +45,7 @@ class SensorViewModel(
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-        startWifiScanning()  // No context needed as it’s now a class property
+        startWifiScanning()  // Start Wi-Fi scanning as a background task
     }
 
     fun startSensorUpdates() {
@@ -87,22 +90,24 @@ class SensorViewModel(
         Log.d("SensorAccuracy", accuracyMessage)
     }
 
-    // Function to start periodic Wi-Fi scanning
     private fun startWifiScanning() {
         viewModelScope.launch(Dispatchers.IO) {
             while (true) {
-                // Check if location permission is granted
                 if (ContextCompat.checkSelfPermission(
                         context,
-                        Manifest.permission.ACCESS_FINE_LOCATION
+                        Manifest.permission.NEARBY_WIFI_DEVICES
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
                     val success = wifiManager.startScan()
                     if (success) {
                         val scanResults: List<ScanResult> = wifiManager.scanResults
-
                         val wifiInfo = scanResults.joinToString(separator = "\n") { result ->
-                            "${result.SSID}: ${result.level} dBm"
+                            val ssid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                result.wifiSsid?.toString() ?: "Unknown SSID"
+                            } else {
+                                result.SSID
+                            }
+                            "$ssid: ${result.level} dBm"
                         }
                         _wifiData.value = wifiInfo
                         Log.d("WiFi Data", wifiInfo)
@@ -112,7 +117,7 @@ class SensorViewModel(
                 } else {
                     Log.d("WiFi Data", "Location permission not granted")
                 }
-                delay(10000)  /* 10 sec */
+                delay(10000)  // 10-second delay between scans
             }
         }
     }
@@ -121,7 +126,7 @@ class SensorViewModel(
 class SensorViewModelFactory(
     private val sensorManager: SensorManager,
     private val wifiManager: WifiManager,
-    private val context: Context  // Add context here for ViewModel
+    private val context: Context
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SensorViewModel::class.java)) {

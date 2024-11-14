@@ -12,8 +12,10 @@
 
     <!-- Wi-Fi permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" /> <!-- Android 13 specific -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
 
 
     <!-- Location permissions (required for Wi-Fi scanning) -->

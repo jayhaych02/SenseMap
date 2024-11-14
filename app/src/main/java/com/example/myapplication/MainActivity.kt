@@ -1,7 +1,6 @@
 package com.example.myapplication
 
-import SensorViewModel
-import SensorViewModelFactory
+
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -34,11 +33,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize SensorManager and WifiManager
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val wifiManager = getSystemService(Context.WIFI_SERVICE) as? WifiManager
         if (sensorManager != null && wifiManager != null) {
-            val factory = SensorViewModelFactory(sensorManager, wifiManager, this)  // Pass `this` as context
+            val factory = SensorViewModelFactory(sensorManager, wifiManager, this)
             sensorViewModel = ViewModelProvider(this, factory).get(SensorViewModel::class.java)
         } else {
             Log.e("MainActivity", "SensorManager or WifiManager is not available.")
@@ -64,20 +62,29 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Request location permission if necessary for Wi-Fi scanning
-        requestLocationPermission()
+        requestPermissions()
     }
 
-    private fun requestLocationPermission() {
-        val locationPermission = Manifest.permission.ACCESS_FINE_LOCATION
-        if (ContextCompat.checkSelfPermission(this, locationPermission) != PackageManager.PERMISSION_GRANTED) {
-            val launcher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-                if (!granted) {
-                    Log.e("MainActivity", "Location permission denied, Wi-Fi scanning will not work.")
+    private fun requestPermissions() {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.CHANGE_WIFI_STATE,
+            Manifest.permission.ACCESS_WIFI_STATE
+        )
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+
+        val permissionArray = permissions.toTypedArray()
+        val launcher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            results.forEach { (permission, isGranted) ->
+                if (!isGranted) {
+                    Log.e("MainActivity", "Permission $permission denied. Wi-Fi scanning might not work.")
                 }
             }
-            launcher.launch(locationPermission)
         }
+        launcher.launch(permissionArray)
     }
 
     override fun onPause() {
@@ -116,26 +123,31 @@ fun CameraPreview(modifier: Modifier = Modifier) {
 
     if (hasCameraPermission) {
         val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+        var previewView = remember { androidx.camera.view.PreviewView(context) }
 
-        AndroidView(modifier = modifier.fillMaxSize(), factory = { ctx ->
-            val previewView = androidx.camera.view.PreviewView(ctx)
-            val cameraProvider = cameraProviderFuture.get()
-
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
+        LaunchedEffect(cameraProviderFuture) {
             try {
+                val cameraProvider = cameraProviderFuture.get()
+                val preview = Preview.Builder().build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(context as ComponentActivity, cameraSelector, preview)
+                cameraProvider.bindToLifecycle(
+                    context as ComponentActivity,
+                    cameraSelector,
+                    preview
+                )
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
 
-            previewView
-        })
+        AndroidView(
+            factory = { previewView },
+            modifier = modifier.fillMaxSize()
+        )
     } else {
         Text("Camera permission required", modifier = Modifier.padding(16.dp))
     }
