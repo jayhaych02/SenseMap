@@ -1,6 +1,5 @@
 package com.example.myapplication
 
-
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -52,6 +51,17 @@ class MainActivity : ComponentActivity() {
                         val gyroscopeData by sensorViewModel.gyroscopeData.collectAsState()
                         val magnetometerData by sensorViewModel.magnetometerData.collectAsState()
                         val wifiData by sensorViewModel.wifiData.collectAsState()
+
+                        val sensorMapVisualization = SensorMapVisualization()
+                        sensorMapVisualization.SensorMapVisualizationScreen(
+                            accelerometerData = accelerometerData,
+                            gyroscopeData = gyroscopeData,
+                            wifiData = wifiData,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        )
+
 
                         SensorDisplay("Accelerometer: $accelerometerData")
                         SensorDisplay("Gyroscope: $gyroscopeData")
@@ -123,8 +133,9 @@ fun CameraPreview(modifier: Modifier = Modifier) {
 
     if (hasCameraPermission) {
         val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-        var previewView = remember { androidx.camera.view.PreviewView(context) }
+        //var previewView = remember { androidx.camera.view.PreviewView(context) } TRYING OUT CHANGE BELOW - NOV 26 2024
 
+        val previewView = remember { androidx.camera.view.PreviewView(context) }
         LaunchedEffect(cameraProviderFuture) {
             try {
                 val cameraProvider = cameraProviderFuture.get()
