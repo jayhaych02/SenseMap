@@ -1,78 +1,83 @@
 package com.example.myapplication
 
-import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.net.wifi.WifiManager
+import android.util.Log
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class SensorViewModel(
     private val sensorManager: SensorManager,
-    private val wifiManager: WifiManager,
-    private val context: Context,
-    private val roomLayoutViewModel: RoomLayoutViewModel
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel(), SensorEventListener {
-
+    private var isCollecting = false
     private val sensorFusion = SensorFusion()
+    private val _data = MutableStateFlow(
+        savedStateHandle.get<SensingData>("sensing_data") ?: SensingData()
+    )
+    private val _error = MutableStateFlow<String?>(null)
+
+    val data: StateFlow<SensingData> = _data.asStateFlow()
+    val error: StateFlow<String?> = _error.asStateFlow()
 
     init {
-        startSensorUpdates()
+        initializeSensor()
     }
 
-    private fun startSensorUpdates() {
-        // Register sensors
-        sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
-        sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
-        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+    fun startCollecting() {
+        isCollecting = true
+    }
+
+    fun stopCollecting() {
+        isCollecting = false
+    }
+
+    private fun initializeSensor() {
+        try {
+            val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+            requireNotNull(sensor) { "Linear acceleration sensor not available" }
+
+            val registered = sensorManager.registerListener(
+                this,
+                sensor,
+                SensorManager.SENSOR_DELAY_GAME
+            )
+            require(registered) { "Failed to register sensor listener" }
+        } catch (e: Exception) {
+            _error.value = "Sensor initialization failed: ${e.message}"
+            Log.e("SensorViewModel", "Sensor initialization failed", e)
         }
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        event?.let {
-            when (it.sensor.type) {
-                Sensor.TYPE_ROTATION_VECTOR -> {
-                    // Process rotation vector for heading updates
-                    val rotationMatrix = FloatArray(9)
-                    val orientation = FloatArray(3)
-                    SensorManager.getRotationMatrixFromVector(rotationMatrix, it.values)
-                    SensorManager.getOrientation(rotationMatrix, orientation)
-
-                    val azimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
-                    sensorFusion.updateHeading(azimuth)
-                    roomLayoutViewModel.updateHeading(azimuth)
-                }
-                Sensor.TYPE_STEP_DETECTOR -> {
-                    // Process steps to update position
-                    sensorFusion.processStep()
-                    val position = sensorFusion.getCurrentPosition()
-                    roomLayoutViewModel.updateCurrentPosition(position)
-                }
-                Sensor.TYPE_ACCELEROMETER -> {
-                    // Process accelerometer for finer movement tracking
-                    val offset = sensorFusion.processAccelerometer(
-                        it.values[0], it.values[1], it.values[2]
-                    )
-                    roomLayoutViewModel.updateCurrentPosition(offset)
-                }
+        if (!isCollecting) return
+        try {
+            event?.takeIf { it.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION }?.let {
+                val newData = sensorFusion.process(it.values)
+                _data.value = newData
+                savedStateHandle["sensing_data"] = newData
             }
+        } catch (e: Exception) {
+            _error.value = "Processing error: ${e.message}"
+            Log.e("SensorViewModel", "Processing error", e)
         }
     }
-    fun resetTracking() {
+
+    fun reset() {
         sensorFusion.reset()
+        _data.value = SensingData()
+        _error.value = null
     }
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     override fun onCleared() {
         super.onCleared()
-        sensorManager.unregisterListener(this) // Unregister sensors when ViewModel is cleared
+        sensorManager.unregisterListener(this)
     }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
-
-

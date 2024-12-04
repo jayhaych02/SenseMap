@@ -1,92 +1,123 @@
 package com.example.myapplication
-
 import android.content.Context
 import android.os.Bundle
 import android.hardware.SensorManager
-import android.net.wifi.WifiManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.AbstractSavedStateViewModelFactory
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.example.myapplication.ui.theme.MyApplicationTheme
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.Icon
-
-
-data class RoomLayout(
-    val corners: List<androidx.compose.ui.geometry.Offset>,
-    val timestamp: Long,
-    val wifiReferences: List<WifiReference> = emptyList()
-)
-
-data class WifiReference(
-    val ssid: String,
-    val strength: Int,
-    val estimatedPosition: androidx.compose.ui.geometry.Offset
-)
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
-    private val roomLayoutViewModel: RoomLayoutViewModel by viewModels()
-    private lateinit var sensorViewModel: SensorViewModel
+    private lateinit var viewModel: SensorViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
 
-        val sensorViewModelFactory = SensorViewModelFactory(
-            sensorManager = sensorManager,
-            wifiManager = wifiManager,
-            context = this,
-            roomLayoutViewModel = roomLayoutViewModel
-        )
-
-        sensorViewModel = ViewModelProvider(this, sensorViewModelFactory)[SensorViewModel::class.java]
+        viewModel = ViewModelProvider(this@MainActivity, object : AbstractSavedStateViewModelFactory(
+            this@MainActivity, savedInstanceState
+        ) {
+            override fun <T : ViewModel> create(
+                key: String,
+                modelClass: Class<T>,
+                handle: SavedStateHandle
+            ): T = SensorViewModel(sensorManager, handle) as T
+        })[SensorViewModel::class.java]
 
         setContent {
-            val corners by roomLayoutViewModel.corners.collectAsState()
-            val currentPosition by roomLayoutViewModel.currentPosition.collectAsState()
-            val heading by roomLayoutViewModel.heading.collectAsState()
+            MaterialTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    var timeRemaining by remember { mutableStateOf(10) }
+                    var showResults by remember { mutableStateOf(false) }
 
-            MyApplicationTheme {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    floatingActionButton = {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FloatingActionButton(
-                                onClick = { sensorViewModel.resetTracking() }
-                            ) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Reset Tracking"
-                                )
-                            }
+                    LaunchedEffect(Unit) {
+                        viewModel.startCollecting()
+                        viewModel.reset()
+
+                        repeat(10) {
+                            delay(1000)
+                            timeRemaining = 9 - it
                         }
+
+                        viewModel.stopCollecting()
+                        showResults = true
                     }
-                ) { contentPadding ->
-                    Box(
+
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(contentPadding)
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        SensorMapVisualization(
-                            corners = corners,
-                            currentPosition = currentPosition,
-                            heading = heading,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        val data by viewModel.data.collectAsState()
+                        val error by viewModel.error.collectAsState()
+
+                        error?.let {
+                            Text(
+                                text = it,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+
+                        if (!showResults) {
+                            Text(
+                                text = "Collecting data: $timeRemaining seconds remaining",
+                                style = MaterialTheme.typography.headlineMedium,
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            )
+                        }
+
+                        if (showResults) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "Results after 10 seconds:",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+
+                                Text("Total Steps: ${data.steps}")
+                                Text("Distance: %.2f meters".format(data.distance))
+                                Text("Avg Pace: %.2f min/km".format(data.pace))
+
+                                Spacer(Modifier.height(32.dp))
+
+                                Button(onClick = {
+                                    showResults = false
+                                    timeRemaining = 10
+                                    viewModel.reset()
+                                    viewModel.startCollecting()
+                                }) {
+                                    Text("Start New Collection")
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                Stage.values().forEach { stage ->
+                                    Text(
+                                        text = stage.name,
+                                        color = if (stage == data.currentStage)
+                                            MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

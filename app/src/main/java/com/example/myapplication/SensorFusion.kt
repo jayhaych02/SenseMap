@@ -1,86 +1,117 @@
 package com.example.myapplication
 
-import kotlin.math.cos
-import kotlin.math.sin
-import androidx.compose.ui.geometry.Offset
-import kotlin.math.abs
+import kotlin.math.sqrt
+import android.os.Parcel
+import android.os.Parcelable
+
+enum class Stage {
+    DATA_COLLECTION,
+    PREPROCESSING,
+    FEATURE_EXTRACTION,
+    CLASSIFICATION
+}
+
+data class SensingData(
+    val steps: Int = 0,
+    val distance: Float = 0f,
+    val pace: Float = 0f,
+    val currentStage: Stage = Stage.DATA_COLLECTION
+) : Parcelable {
+    constructor(parcel: Parcel) : this(
+        parcel.readInt(),
+        parcel.readFloat(),
+        parcel.readFloat(),
+        Stage.valueOf(parcel.readString() ?: Stage.DATA_COLLECTION.name)
+    )
+
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        parcel.writeInt(steps)
+        parcel.writeFloat(distance)
+        parcel.writeFloat(pace)
+        parcel.writeString(currentStage.name)
+    }
+
+    override fun describeContents() = 0
+
+    companion object CREATOR : Parcelable.Creator<SensingData> {
+        override fun createFromParcel(parcel: Parcel) = SensingData(parcel)
+        override fun newArray(size: Int) = arrayOfNulls<SensingData?>(size)
+    }
+}
 
 class SensorFusion {
-    private var positionX = 0f
-    private var positionY = 0f
-    private var heading = 0f
-    private var stepLength = 0.75f
-    private var lastAccelTime = 0L
-    private var velocityX = 0f
-    private var velocityY = 0f
-
-    // Motion detection threshold
-    private val movementThreshold = 0.1f
-    private val velocityDecay = 0.95f
-
-    // Kalman filter variables
-    private var estimatedError = 1.0f
-    private val measurementError = 0.1f
-    private val processError = 0.1f
-
-    private fun kalmanFilter(measurement: Float, estimate: Float): Float {
-        val kalmanGain = estimatedError / (estimatedError + measurementError)
-        val newEstimate = estimate + kalmanGain * (measurement - estimate)
-        estimatedError = (1 - kalmanGain) * estimatedError + processError
-        return newEstimate
+    companion object {
+        private const val STEP_LENGTH = 0.75f
+        private const val PEAK_THRESHOLD = 12f
+        private const val MIN_STEP_INTERVAL = 250L
+        private const val FILTER_ALPHA = 0.8f
+        private const val MAX_ACCELERATION = 50f
     }
 
-    fun updateHeading(azimuth: Float) {
-        // Apply Kalman filtering to heading
-        heading = kalmanFilter(azimuth, heading)
+    private var stepCount = 0
+    private var totalDistance = 0f
+    private var startTime = System.currentTimeMillis()
+    private var lastStepTime = 0L
+    private var isInStep = false
+    private var lastFiltered = FloatArray(3)
+
+    @Synchronized
+    fun process(acceleration: FloatArray): SensingData {
+        require(acceleration.size == 3) { "Invalid acceleration data size: ${acceleration.size}" }
+        val currentTime = System.currentTimeMillis()
+        var stage = Stage.DATA_COLLECTION
+
+        val bounded = acceleration.map {
+            it.coerceIn(-MAX_ACCELERATION, MAX_ACCELERATION)
+        }.toFloatArray()
+
+        stage = Stage.PREPROCESSING
+        val filtered = FloatArray(3) { i ->
+            FILTER_ALPHA * lastFiltered[i] + (1 - FILTER_ALPHA) * bounded[i]
+        }.also { lastFiltered = it }
+
+        stage = Stage.FEATURE_EXTRACTION
+        val magnitude = sqrt(filtered.sumOf { it * it.toDouble() }).toFloat()
+
+        stage = Stage.CLASSIFICATION
+        detectStep(magnitude, currentTime)
+
+        return SensingData(
+            steps = stepCount,
+            distance = totalDistance,
+            pace = calculatePace(currentTime),
+            currentStage = stage
+        )
     }
 
-    fun processStep() {
-        val radians = Math.toRadians(heading.toDouble())
-        val dx = (stepLength * cos(radians)).toFloat()
-        val dy = (stepLength * sin(radians)).toFloat()
-
-        // Apply Kalman filtering to position updates
-        positionX = kalmanFilter(positionX + dx, positionX)
-        positionY = kalmanFilter(positionY + dy, positionY)
-    }
-
-    fun processAccelerometer(x: Float, y: Float, z: Float): Offset {
-        val currentTime = System.nanoTime()
-        if (lastAccelTime == 0L) {
-            lastAccelTime = currentTime
-            return Offset(positionX, positionY)
+    @Synchronized
+    private fun detectStep(magnitude: Float, currentTime: Long) {
+        if (magnitude > PEAK_THRESHOLD && !isInStep &&
+            (currentTime - lastStepTime) > MIN_STEP_INTERVAL) {
+            stepCount++
+            totalDistance += STEP_LENGTH
+            lastStepTime = currentTime
+            isInStep = true
+        } else if (magnitude < PEAK_THRESHOLD) {
+            isInStep = false
         }
-
-        val dt = ((currentTime - lastAccelTime) / 1e9f).coerceAtMost(0.1f)
-        lastAccelTime = currentTime
-
-        // Apply movement threshold to reduce drift
-        if (abs(x) > movementThreshold || abs(y) > movementThreshold) {
-            velocityX = velocityX * velocityDecay + x * dt
-            velocityY = velocityY * velocityDecay + y * dt
-
-            // Apply Kalman filtering to position updates
-            positionX = kalmanFilter(positionX + velocityX * dt, positionX)
-            positionY = kalmanFilter(positionY + velocityY * dt, positionY)
-        } else {
-            // Decay velocity when no significant movement is detected
-            velocityX *= velocityDecay
-            velocityY *= velocityDecay
-        }
-
-        return Offset(positionX, positionY)
     }
 
-    fun getCurrentPosition(): Offset {
-        return Offset(positionX, positionY)
-    }
-
+    @Synchronized
     fun reset() {
-        positionX = 0f
-        positionY = 0f
-        velocityX = 0f
-        velocityY = 0f
-        lastAccelTime = 0L
+        stepCount = 0
+        totalDistance = 0f
+        startTime = System.currentTimeMillis()
+        lastStepTime = 0L
+        isInStep = false
+        lastFiltered = FloatArray(3)
     }
+
+    private fun calculatePace(currentTime: Long): Float {
+        val elapsedMinutes = (currentTime - startTime) / 60000f
+        return if (totalDistance > 0 && elapsedMinutes > 0)
+            elapsedMinutes / (totalDistance / 1000)
+        else 0f
+    }
+
 }
