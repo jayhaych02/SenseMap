@@ -18,7 +18,8 @@ data class SensingData(
     val pace: Float = 0f,
     val calories: Float = 0f,
     val fitnessLevel: FitnessLevel = FitnessLevel.BEGINNER,
-    val currentStage: Stage = Stage.DATA_COLLECTION
+    val currentStage: Stage = Stage.DATA_COLLECTION,
+    val rotation: Float = 0f
 ) : Parcelable {
     constructor(parcel: Parcel) : this(
         parcel.readInt(),
@@ -26,7 +27,8 @@ data class SensingData(
         parcel.readFloat(),
         parcel.readFloat(),
         FitnessLevel.valueOf(parcel.readString() ?: FitnessLevel.BEGINNER.name),
-        Stage.valueOf(parcel.readString() ?: Stage.DATA_COLLECTION.name)
+        Stage.valueOf(parcel.readString() ?: Stage.DATA_COLLECTION.name),
+        parcel.readFloat()
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -36,6 +38,7 @@ data class SensingData(
         parcel.writeFloat(calories)
         parcel.writeString(fitnessLevel.name)
         parcel.writeString(currentStage.name)
+        parcel.writeFloat(rotation)
     }
 
     override fun describeContents() = 0
@@ -68,15 +71,23 @@ class SensorFusion {
     private var lastStepTime = 0L
     private var isInStep = false
     private var lastFiltered = FloatArray(3)
+    private var lastGyroFiltered = FloatArray(3)
     private var scaleDistance = 6f
 
     @Synchronized
-    fun process(acceleration: FloatArray): SensingData {
+    fun process(acceleration: FloatArray, gyroscope: FloatArray): SensingData {
         require(acceleration.size == 3) { "Invalid acceleration data size: ${acceleration.size}" }
+        require(gyroscope.size == 3) { "Invalid gyroscope data size: ${gyroscope.size}" }
         val currentTime = System.currentTimeMillis()
         var stage = Stage.DATA_COLLECTION
 
+        // Process acceleration
         val bounded = acceleration.map {
+            it.coerceIn(-MAX_ACCELERATION, MAX_ACCELERATION)
+        }.toFloatArray()
+
+        // Process gyroscope
+        val boundedGyro = gyroscope.map {
             it.coerceIn(-MAX_ACCELERATION, MAX_ACCELERATION)
         }.toFloatArray()
 
@@ -85,8 +96,13 @@ class SensorFusion {
             FILTER_ALPHA * lastFiltered[i] + (1 - FILTER_ALPHA) * bounded[i]
         }.also { lastFiltered = it }
 
+        val filteredGyro = FloatArray(3) { i ->
+            FILTER_ALPHA * lastGyroFiltered[i] + (1 - FILTER_ALPHA) * boundedGyro[i]
+        }.also { lastGyroFiltered = it }
+
         stage = Stage.FEATURE_EXTRACTION
-        val magnitude = sqrt(filtered.sumOf { it * it.toDouble() }).toFloat()
+        val magnitude = sqrt(filtered.sumOf { it * it.toDouble() }.toFloat() +
+                filteredGyro.sumOf { it * it.toDouble() }.toFloat())
 
         stage = Stage.CLASSIFICATION
         detectStep(magnitude, currentTime)
@@ -96,6 +112,7 @@ class SensorFusion {
         val pace = calculatePace(currentTime) * PACE_SCALE
         val calories = calculateCalories(steps, distance, pace)
         val fitnessLevel = determineFitnessLevel(calories)
+        val rotation = filteredGyro[2]
 
         return SensingData(
             steps = steps,
@@ -103,7 +120,8 @@ class SensorFusion {
             pace = pace,
             calories = calories,
             fitnessLevel = fitnessLevel,
-            currentStage = stage
+            currentStage = stage,
+            rotation = rotation
         )
     }
 
@@ -142,6 +160,7 @@ class SensorFusion {
         lastStepTime = 0L
         isInStep = false
         lastFiltered = FloatArray(3)
+        lastGyroFiltered = FloatArray(3)
     }
 
     private fun calculatePace(currentTime: Long): Float {

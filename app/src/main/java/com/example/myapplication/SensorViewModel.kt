@@ -21,12 +21,16 @@ class SensorViewModel(
         savedStateHandle.get<SensingData>("sensing_data") ?: SensingData()
     )
     private val _error = MutableStateFlow<String?>(null)
+    private var lastAcceleration = FloatArray(3)
+    private var lastGyroscope = FloatArray(3)
+    private var hasAccelData = false
+    private var hasGyroData = false
 
     val data: StateFlow<SensingData> = _data.asStateFlow()
     val error: StateFlow<String?> = _error.asStateFlow()
 
     init {
-        initializeSensor()
+        initializeSensors()
     }
 
     fun startCollecting() {
@@ -37,17 +41,17 @@ class SensorViewModel(
         isCollecting = false
     }
 
-    private fun initializeSensor() {
+    private fun initializeSensors() {
         try {
-            val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-            requireNotNull(sensor) { "Linear acceleration sensor not available" }
+            val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+            val gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
-            val registered = sensorManager.registerListener(
-                this,
-                sensor,
-                SensorManager.SENSOR_DELAY_GAME
-            )
-            require(registered) { "Failed to register sensor listener" }
+            requireNotNull(accelSensor) { "Linear acceleration sensor not available" }
+            requireNotNull(gyroSensor) { "Gyroscope sensor not available" }
+
+            sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME)
+            sensorManager.registerListener(this, gyroSensor, SensorManager.SENSOR_DELAY_GAME)
+
         } catch (e: Exception) {
             _error.value = "Sensor initialization failed: ${e.message}"
             Log.e("SensorViewModel", "Sensor initialization failed", e)
@@ -57,10 +61,23 @@ class SensorViewModel(
     override fun onSensorChanged(event: SensorEvent?) {
         if (!isCollecting) return
         try {
-            event?.takeIf { it.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION }?.let {
-                val newData = sensorFusion.process(it.values)
+            when (event?.sensor?.type) {
+                Sensor.TYPE_LINEAR_ACCELERATION -> {
+                    lastAcceleration = event.values.clone()
+                    hasAccelData = true
+                }
+                Sensor.TYPE_GYROSCOPE -> {
+                    lastGyroscope = event.values.clone()
+                    hasGyroData = true
+                }
+            }
+
+            if (hasAccelData && hasGyroData) {
+                val newData = sensorFusion.process(lastAcceleration, lastGyroscope)
                 _data.value = newData
                 savedStateHandle["sensing_data"] = newData
+                hasAccelData = false
+                hasGyroData = false
             }
         } catch (e: Exception) {
             _error.value = "Processing error: ${e.message}"
@@ -72,6 +89,8 @@ class SensorViewModel(
         sensorFusion.reset()
         _data.value = SensingData()
         _error.value = null
+        hasAccelData = false
+        hasGyroData = false
     }
 
     override fun onCleared() {
