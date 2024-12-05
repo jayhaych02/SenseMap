@@ -1,4 +1,5 @@
 package com.example.myapplication
+
 import android.content.Context
 import android.os.Bundle
 import android.hardware.SensorManager
@@ -71,39 +72,10 @@ class MainActivity : ComponentActivity() {
 
                         if (!showResults) {
                             Text(
-                                text = "Collecting data: $timeRemaining seconds remaining",
+                                text = "Workout in Progress: $timeRemaining s",
                                 style = MaterialTheme.typography.headlineMedium,
                                 modifier = Modifier.padding(bottom = 16.dp)
                             )
-                        }
-
-                        if (showResults) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "Results after 10 seconds:",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    modifier = Modifier.padding(bottom = 16.dp)
-                                )
-
-                                Text("Total Steps: ${data.steps}")
-                                Text("Distance: %.2f meters".format(data.distance))
-                                Text("Avg Pace: %.2f min/km".format(data.pace))
-
-                                Spacer(Modifier.height(32.dp))
-
-                                Button(onClick = {
-                                    showResults = false
-                                    timeRemaining = 10
-                                    viewModel.reset()
-                                    viewModel.startCollecting()
-                                }) {
-                                    Text("Start New Collection")
-                                }
-                            }
-                        } else {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -115,6 +87,23 @@ class MainActivity : ComponentActivity() {
                                             MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onSurface
                                     )
+                                }
+                            }
+                        } else {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("Steps: ${data.steps}")
+                                    Text("Distance: %.2f m".format(data.distance))
+                                    Text("Pace: %.1f min/km".format(data.pace))
+                                    Text("Calories: %.1f".format(data.calories))
+                                    Text("Level: ${data.fitnessLevel}")
                                 }
                             }
                         }

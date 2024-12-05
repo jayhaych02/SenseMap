@@ -8,16 +8,24 @@ enum class Stage {
     DATA_COLLECTION, PREPROCESSING, FEATURE_EXTRACTION, CLASSIFICATION
 }
 
+enum class FitnessLevel {
+    BEGINNER, INTERMEDIATE, ADVANCED
+}
+
 data class SensingData(
     val steps: Int = 0,
     val distance: Float = 0f,
     val pace: Float = 0f,
+    val calories: Float = 0f,
+    val fitnessLevel: FitnessLevel = FitnessLevel.BEGINNER,
     val currentStage: Stage = Stage.DATA_COLLECTION
 ) : Parcelable {
     constructor(parcel: Parcel) : this(
         parcel.readInt(),
         parcel.readFloat(),
         parcel.readFloat(),
+        parcel.readFloat(),
+        FitnessLevel.valueOf(parcel.readString() ?: FitnessLevel.BEGINNER.name),
         Stage.valueOf(parcel.readString() ?: Stage.DATA_COLLECTION.name)
     )
 
@@ -25,6 +33,8 @@ data class SensingData(
         parcel.writeInt(steps)
         parcel.writeFloat(distance)
         parcel.writeFloat(pace)
+        parcel.writeFloat(calories)
+        parcel.writeString(fitnessLevel.name)
         parcel.writeString(currentStage.name)
     }
 
@@ -38,17 +48,18 @@ data class SensingData(
 
 class SensorFusion {
     companion object {
-        private const val SAMPLING_RATE = 0.25f // Sample every 250ms
+        private const val SAMPLING_RATE = 0.25f
         private const val STEPS_PER_SECOND = 4f
         private const val STEPS_MULTIPLIER = STEPS_PER_SECOND / SAMPLING_RATE
-
         private const val STEP_LENGTH = 0.75f
         private const val PEAK_THRESHOLD = 12f
         private const val MIN_STEP_INTERVAL = 250L
         private const val FILTER_ALPHA = 0.8f
         private const val MAX_ACCELERATION = 50f
-        //private const val MPH_TO_MINKM = 19.3f
         private const val PACE_SCALE = 0.086f
+        private const val CALORIES_PER_STEP = 0.04f
+        private const val CALORIES_PER_METER = 0.05f
+        private const val PACE_CALORIE_MULTIPLIER = 0.1f
     }
 
     private var stepCount = 0
@@ -80,12 +91,34 @@ class SensorFusion {
         stage = Stage.CLASSIFICATION
         detectStep(magnitude, currentTime)
 
+        val steps = stepCount * STEPS_MULTIPLIER.toInt()
+        val distance = totalDistance * scaleDistance
+        val pace = calculatePace(currentTime) * PACE_SCALE
+        val calories = calculateCalories(steps, distance, pace)
+        val fitnessLevel = determineFitnessLevel(calories)
+
         return SensingData(
-            steps = stepCount * STEPS_MULTIPLIER.toInt(),
-            distance = totalDistance * scaleDistance,
-            pace = calculatePace(currentTime) * PACE_SCALE,
+            steps = steps,
+            distance = distance,
+            pace = pace,
+            calories = calories,
+            fitnessLevel = fitnessLevel,
             currentStage = stage
         )
+    }
+
+    private fun calculateCalories(steps: Int, distance: Float, pace: Float): Float {
+        return (steps * CALORIES_PER_STEP) +
+                (distance * CALORIES_PER_METER) +
+                (pace * PACE_CALORIE_MULTIPLIER)
+    }
+
+    private fun determineFitnessLevel(calories: Float): FitnessLevel {
+        return when {
+            calories > 50 -> FitnessLevel.ADVANCED
+            calories > 25 -> FitnessLevel.INTERMEDIATE
+            else -> FitnessLevel.BEGINNER
+        }
     }
 
     @Synchronized
