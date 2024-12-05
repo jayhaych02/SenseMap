@@ -38,13 +38,16 @@ data class SensingData(
 
 class SensorFusion {
     companion object {
+        private const val SAMPLING_RATE = 0.25f // Sample every 250ms
+        private const val STEPS_PER_SECOND = 4f
+        private const val STEPS_MULTIPLIER = STEPS_PER_SECOND / SAMPLING_RATE
+
         private const val STEP_LENGTH = 0.75f
         private const val PEAK_THRESHOLD = 12f
         private const val MIN_STEP_INTERVAL = 250L
         private const val FILTER_ALPHA = 0.8f
         private const val MAX_ACCELERATION = 50f
-        private const val STEPS_MULTIPLIER = 5
-        private const val MPH_TO_MINKM = 19.3f
+        //private const val MPH_TO_MINKM = 19.3f
         private const val PACE_SCALE = 0.086f
     }
 
@@ -78,7 +81,7 @@ class SensorFusion {
         detectStep(magnitude, currentTime)
 
         return SensingData(
-            steps = stepCount * STEPS_MULTIPLIER,
+            steps = stepCount * STEPS_MULTIPLIER.toInt(),
             distance = totalDistance * scaleDistance,
             pace = calculatePace(currentTime) * PACE_SCALE,
             currentStage = stage
