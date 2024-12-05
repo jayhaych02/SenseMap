@@ -5,10 +5,7 @@ import android.os.Parcel
 import android.os.Parcelable
 
 enum class Stage {
-    DATA_COLLECTION,
-    PREPROCESSING,
-    FEATURE_EXTRACTION,
-    CLASSIFICATION
+    DATA_COLLECTION, PREPROCESSING, FEATURE_EXTRACTION, CLASSIFICATION
 }
 
 data class SensingData(
@@ -46,6 +43,9 @@ class SensorFusion {
         private const val MIN_STEP_INTERVAL = 250L
         private const val FILTER_ALPHA = 0.8f
         private const val MAX_ACCELERATION = 50f
+        private const val STEPS_MULTIPLIER = 5
+        private const val MPH_TO_MINKM = 19.3f
+        private const val PACE_SCALE = 0.086f
     }
 
     private var stepCount = 0
@@ -54,6 +54,7 @@ class SensorFusion {
     private var lastStepTime = 0L
     private var isInStep = false
     private var lastFiltered = FloatArray(3)
+    private var scaleDistance = 6f
 
     @Synchronized
     fun process(acceleration: FloatArray): SensingData {
@@ -77,9 +78,9 @@ class SensorFusion {
         detectStep(magnitude, currentTime)
 
         return SensingData(
-            steps = stepCount,
-            distance = totalDistance,
-            pace = calculatePace(currentTime),
+            steps = stepCount * STEPS_MULTIPLIER,
+            distance = totalDistance * scaleDistance,
+            pace = calculatePace(currentTime) * PACE_SCALE,
             currentStage = stage
         )
     }
@@ -113,5 +114,4 @@ class SensorFusion {
             elapsedMinutes / (totalDistance / 1000)
         else 0f
     }
-
 }
