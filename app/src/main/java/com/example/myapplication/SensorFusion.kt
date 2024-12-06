@@ -3,6 +3,10 @@ package com.example.myapplication
 import kotlin.math.sqrt
 import android.os.Parcel
 import android.os.Parcelable
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 
 enum class Stage {
     DATA_COLLECTION, PREPROCESSING, FEATURE_EXTRACTION, CLASSIFICATION
@@ -19,7 +23,7 @@ data class SensingData(
     val calories: Float = 0f,
     val fitnessLevel: FitnessLevel = FitnessLevel.BEGINNER,
     val currentStage: Stage = Stage.DATA_COLLECTION,
-    val rotation: Float = 0f
+    val acceleration: Float = 0f
 ) : Parcelable {
     constructor(parcel: Parcel) : this(
         parcel.readInt(),
@@ -38,7 +42,7 @@ data class SensingData(
         parcel.writeFloat(calories)
         parcel.writeString(fitnessLevel.name)
         parcel.writeString(currentStage.name)
-        parcel.writeFloat(rotation)
+        parcel.writeFloat(acceleration)
     }
 
     override fun describeContents() = 0
@@ -49,14 +53,10 @@ data class SensingData(
     }
 }
 
-class SensorFusion {
+class SensorFusion(private val sensorManager: SensorManager) : SensorEventListener {
     companion object {
         private const val SAMPLING_RATE = 0.25f
-        private const val STEPS_PER_SECOND = 4f
-        private const val STEPS_MULTIPLIER = STEPS_PER_SECOND / SAMPLING_RATE
         private const val STEP_LENGTH = 0.75f
-        private const val PEAK_THRESHOLD = 12f
-        private const val MIN_STEP_INTERVAL = 250L
         private const val FILTER_ALPHA = 0.8f
         private const val MAX_ACCELERATION = 50f
         private const val PACE_SCALE = 0.086f
@@ -66,18 +66,29 @@ class SensorFusion {
     }
 
     private var stepCount = 0
+    private var initialStepCount: Int? = null
     private var totalDistance = 0f
     private var startTime = System.currentTimeMillis()
-    private var lastStepTime = 0L
-    private var isInStep = false
     private var lastFiltered = FloatArray(3)
-    private var lastGyroFiltered = FloatArray(3)
+    private var currentLinearAccel = FloatArray(3)
     private var scaleDistance = 6f
+    private var onDataUpdated: ((SensingData) -> Unit)? = null
+
+    init {
+        initializeSensors()
+    }
+
+    private fun initializeSensors() {
+        val linearAccelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        val stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+
+        sensorManager.registerListener(this, linearAccelSensor, SensorManager.SENSOR_DELAY_GAME)
+        sensorManager.registerListener(this, stepCounterSensor, SensorManager.SENSOR_DELAY_GAME)
+    }
 
     @Synchronized
-    fun process(acceleration: FloatArray, gyroscope: FloatArray): SensingData {
+    fun process(acceleration: FloatArray): SensingData {
         require(acceleration.size == 3) { "Invalid acceleration data size: ${acceleration.size}" }
-        require(gyroscope.size == 3) { "Invalid gyroscope data size: ${gyroscope.size}" }
         val currentTime = System.currentTimeMillis()
         var stage = Stage.DATA_COLLECTION
 
@@ -86,43 +97,46 @@ class SensorFusion {
             it.coerceIn(-MAX_ACCELERATION, MAX_ACCELERATION)
         }.toFloatArray()
 
-        // Process gyroscope
-        val boundedGyro = gyroscope.map {
-            it.coerceIn(-MAX_ACCELERATION, MAX_ACCELERATION)
-        }.toFloatArray()
-
         stage = Stage.PREPROCESSING
         val filtered = FloatArray(3) { i ->
             FILTER_ALPHA * lastFiltered[i] + (1 - FILTER_ALPHA) * bounded[i]
         }.also { lastFiltered = it }
 
-        val filteredGyro = FloatArray(3) { i ->
-            FILTER_ALPHA * lastGyroFiltered[i] + (1 - FILTER_ALPHA) * boundedGyro[i]
-        }.also { lastGyroFiltered = it }
-
         stage = Stage.FEATURE_EXTRACTION
-        val magnitude = sqrt(filtered.sumOf { it * it.toDouble() }.toFloat() +
-                filteredGyro.sumOf { it * it.toDouble() }.toFloat())
+        val magnitude = sqrt(filtered.sumOf { it * it.toDouble() }.toFloat())
 
         stage = Stage.CLASSIFICATION
-        detectStep(magnitude, currentTime)
-
-        val steps = stepCount * STEPS_MULTIPLIER.toInt()
         val distance = totalDistance * scaleDistance
         val pace = calculatePace(currentTime) * PACE_SCALE
-        val calories = calculateCalories(steps, distance, pace)
+        val calories = calculateCalories(stepCount, distance, pace)
         val fitnessLevel = determineFitnessLevel(calories)
-        val rotation = filteredGyro[2]
 
         return SensingData(
-            steps = steps,
+            steps = stepCount,
             distance = distance,
             pace = pace,
             calories = calories,
             fitnessLevel = fitnessLevel,
             currentStage = stage,
-            rotation = rotation
+            acceleration = magnitude
         )
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        when (event.sensor.type) {
+            Sensor.TYPE_LINEAR_ACCELERATION -> {
+                currentLinearAccel = event.values.clone()
+                onDataUpdated?.invoke(process(currentLinearAccel))
+            }
+            Sensor.TYPE_STEP_COUNTER -> {
+                val steps = event.values[0].toInt()
+                if (initialStepCount == null) {
+                    initialStepCount = steps
+                }
+                stepCount = steps - (initialStepCount ?: steps)
+                totalDistance = stepCount * STEP_LENGTH
+            }
+        }
     }
 
     private fun calculateCalories(steps: Int, distance: Float, pace: Float): Float {
@@ -140,27 +154,13 @@ class SensorFusion {
     }
 
     @Synchronized
-    private fun detectStep(magnitude: Float, currentTime: Long) {
-        if (magnitude > PEAK_THRESHOLD && !isInStep &&
-            (currentTime - lastStepTime) > MIN_STEP_INTERVAL) {
-            stepCount++
-            totalDistance += STEP_LENGTH
-            lastStepTime = currentTime
-            isInStep = true
-        } else if (magnitude < PEAK_THRESHOLD) {
-            isInStep = false
-        }
-    }
-
-    @Synchronized
     fun reset() {
         stepCount = 0
+        initialStepCount = null
         totalDistance = 0f
         startTime = System.currentTimeMillis()
-        lastStepTime = 0L
-        isInStep = false
         lastFiltered = FloatArray(3)
-        lastGyroFiltered = FloatArray(3)
+        currentLinearAccel = FloatArray(3)
     }
 
     private fun calculatePace(currentTime: Long): Float {
@@ -169,4 +169,14 @@ class SensorFusion {
             elapsedMinutes / (totalDistance / 1000)
         else 0f
     }
+
+    fun setOnDataUpdatedListener(listener: (SensingData) -> Unit) {
+        onDataUpdated = listener
+    }
+
+    fun cleanup() {
+        sensorManager.unregisterListener(this)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
